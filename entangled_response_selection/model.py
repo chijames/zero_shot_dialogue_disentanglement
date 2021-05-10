@@ -51,6 +51,6 @@ class Encoder(BertPreTrainedModel):
             loss = F.binary_cross_entropy_with_logits(score, labels.float())
             aux_loss = (attn_weights.squeeze()[:,-1]-(1-labels.reshape(-1)))**2
             aux_loss = aux_loss.mean()
-            return loss + self.aux_weight*aux_loss
+            return (1-self.aux_weight)*loss + self.aux_weight*aux_loss
         else:
             return score, (torch.argmax(attn_weights.squeeze(), 1) == seq_len-1).float()
