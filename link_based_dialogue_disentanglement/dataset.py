@@ -33,8 +33,10 @@ class SelectionDataset(Dataset):
                         'labels': []
                     }
                 i += 1
-                if sample_cnt is not None and len(self.data_source) >= sample_cnt:
-                    break
+        if sample_cnt is not None:
+            random.shuffle(self.data_source)
+            subset = int(len(self.data_source)*sample_cnt)
+            self.data_source = self.data_source[:subset]
 
     def __len__(self):
         return len(self.data_source)
