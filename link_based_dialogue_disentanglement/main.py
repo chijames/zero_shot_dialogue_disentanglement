@@ -37,7 +37,8 @@ def eval_running_model(dataloader, test=False):
         batch = tuple(t.to(device) for t in batch)
         text_token_ids_list_batch, text_input_masks_list_batch, type_ids_batch, labels_batch = batch
         with torch.no_grad():
-            logits = model(text_token_ids_list_batch, text_input_masks_list_batch, type_ids_batch)
+            with torch.cuda.amp.autocast(enabled=args.fp16):
+                logits = model(text_token_ids_list_batch, text_input_masks_list_batch, type_ids_batch)
         preds += torch.argmax(logits, 1).data.cpu().numpy().tolist()
     '''
     with open('link/map_res/{}.json'.format(args.max_num_contexts), 'w') as outfile:
@@ -97,6 +98,7 @@ if __name__ == '__main__':
 
     parser.add_argument("--use_pretrain", action="store_true")
 
+    parser.add_argument("--data_percent", type=float, default=1.0)
     parser.add_argument("--max_contexts_length", default=32, type=int)
     parser.add_argument("--max_num_contexts", default=15, type=int)
     parser.add_argument("--train_batch_size", default=4, type=int, help="Total batch size for training.")
@@ -119,13 +121,6 @@ if __name__ == '__main__':
         action="store_true",
         help="Whether to use 16-bit (mixed) precision (through NVIDIA apex) instead of 32-bit",
     )
-    parser.add_argument(
-        "--fp16_opt_level",
-        type=str,
-        default="O1",
-        help="For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
-                  "See details at https://nvidia.github.io/apex/amp.html",
-    )
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--gold', help='File(s) containing the gold clusters, one per line. If a line contains a ":" the start is considered a filename', required=True, nargs="+")
     args = parser.parse_args()
@@ -147,7 +142,7 @@ if __name__ == '__main__':
     print('=' * 80)
 
     if not args.eval:
-        train_dataset = SelectionDataset(os.path.join(args.train_dir, 'train.txt'), args, tokenizer, sample_cnt=100)
+        train_dataset = SelectionDataset(os.path.join(args.train_dir, 'train.txt'), args, tokenizer, sample_cnt=args.data_percent)
         val_dataset = SelectionDataset(os.path.join(args.train_dir, 'test.txt'), args, tokenizer)
         train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, collate_fn=train_dataset.batchify_join_str, shuffle=True, num_workers=1)
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
@@ -169,7 +164,7 @@ if __name__ == '__main__':
     log_wf = open(os.path.join(args.output_dir, 'log.txt'), 'a', encoding='utf-8')
     print (args, file=log_wf)
 
-    state_save_path = os.path.join(args.output_dir, 'pytorch_model.bin2000')
+    state_save_path = os.path.join(args.output_dir, 'pytorch_model.bin1')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ########################################
@@ -198,7 +193,7 @@ if __name__ == '__main__':
     #tokenizer.add_tokens(['\n'], special_tokens=True)
     #model.resize_token_embeddings(len(tokenizer)) 
     if args.two_stage:
-        previous_model_file = os.path.join(args.bert_model, 'pytorch_model.bin5614')
+        previous_model_file = os.path.join(args.bert_model, 'pytorch_model.bin1')
         print('Loading parameters from', previous_model_file)
         log_wf.write('Loading parameters from %s' % previous_model_file + '\n')
         model_state_dict = torch.load(previous_model_file)
@@ -230,12 +225,7 @@ if __name__ == '__main__':
     scheduler = get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps=int(t_total*0.1), num_training_steps=t_total
     )
-    if args.fp16:
-        try:
-            from apex import amp
-        except ImportError:
-            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
-        model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level)
+    scaler = torch.cuda.amp.GradScaler(enabled=args.fp16)
 
     print_freq = args.print_freq//args.gradient_accumulation_steps
     eval_freq = min(len(train_dataloader) // 2, 1000)
@@ -251,25 +241,19 @@ if __name__ == '__main__':
                 optimizer.zero_grad()
                 batch = tuple(t.to(device) for t in batch)
                 text_token_ids_list_batch, text_input_masks_list_batch, type_ids_batch, labels_batch = batch
-                loss = model(text_token_ids_list_batch, text_input_masks_list_batch, type_ids_batch, labels_batch)
+                with torch.cuda.amp.autocast(enabled=args.fp16):
+                    loss = model(text_token_ids_list_batch, text_input_masks_list_batch, type_ids_batch, labels_batch)
 
                 loss = loss / args.gradient_accumulation_steps
-                
-                if args.fp16:
-                    with amp.scale_loss(loss, optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                else:
-                    loss.backward()
-                
+                scaler.scale(loss).backward()
                 tr_loss += loss.item()
 
                 if (step + 1) % args.gradient_accumulation_steps == 0:
-                    if args.fp16:
-                        torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
-                    else:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                     nb_tr_steps += 1
-                    optimizer.step()
+                    scaler.step(optimizer)
+                    scaler.update()
                     scheduler.step()
                     model.zero_grad()
                     global_step += 1

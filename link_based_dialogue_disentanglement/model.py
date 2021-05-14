@@ -30,7 +30,7 @@ class CrossEncoder(BertPreTrainedModel):
         text_vec = self.bert(text_input_ids, text_input_masks, type_ids)[0][:,0,:]  # [bs*neg,dim]
         text_vec = text_vec.reshape(batch_size, neg, -1)
         text_vec = self.pos_enc(text_vec)
-        text_vec = self.transformer(text_vec)#[0]
+        text_vec = self.transformer(text_vec.transpose(1, 0)).transpose(1, 0)
         score = self.linear(text_vec).squeeze(-1)
         if labels is not None:
             loss = -(F.log_softmax(score, -1)*labels).sum(-1).mean()

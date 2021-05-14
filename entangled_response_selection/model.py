@@ -34,7 +34,7 @@ class Encoder(BertPreTrainedModel):
         dim = text_vec.shape[-1]
         text_vec = text_vec.reshape(-1, seq_len, dim)
         text_vec = self.pos_enc(text_vec)
-        text_vec = self.transformer(text_vec)#[0]
+        text_vec = self.transformer(text_vec.transpose(1, 0)).transpose(1, 0)
         score = self.linear(text_vec)
         # use a self attention to promote linking
         # mask debug
