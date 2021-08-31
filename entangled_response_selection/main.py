@@ -166,10 +166,7 @@ if __name__ == '__main__':
     val_dataloader = DataLoader(val_dataset, batch_size=args.eval_batch_size, collate_fn=val_dataset.batchify_join_str, shuffle=False, num_workers=1)
 
 
-    epoch_start = 1
     global_step = 0
-    best_eval_loss = float('inf')
-    best_test_loss = float('inf')
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
@@ -236,7 +233,7 @@ if __name__ == '__main__':
     eval_freq = eval_freq//args.gradient_accumulation_steps
     print('Print freq:', print_freq, "Eval freq:", eval_freq)
 
-    for epoch in range(epoch_start, int(args.num_train_epochs) + 1):
+    for epoch in range(1, int(args.num_train_epochs) + 1):
         tr_loss = 0
         nb_tr_steps = 0
         with tqdm(total=len(train_dataloader)//args.gradient_accumulation_steps) as bar:
@@ -268,19 +265,6 @@ if __name__ == '__main__':
                         print(global_step, tr_loss / nb_tr_steps)
                         log_wf.write('%d\t%f\n' % (global_step, tr_loss / nb_tr_steps))
 
-                    if global_step and global_step % eval_freq == 0:
-                        val_result = eval_running_model(val_dataloader)
-                        print('Global Step %d VAL res:\n' % global_step, val_result)
-                        log_wf.write('Global Step %d VAL res:\n' % global_step)
-                        log_wf.write(str(val_result) + '\n')
-
-                        if -val_result['R1'] < best_eval_loss:
-                            best_eval_loss = -val_result['R1']
-                            val_result['best_eval_loss'] = best_eval_loss
-                            # save model
-                            print('[Saving at]', state_save_path)
-                            log_wf.write('[Saving at] %s\n' % state_save_path)
-                            torch.save(model.state_dict(), state_save_path+str(global_step))
                 log_wf.flush()
 
         # add a eval step after each epoch
@@ -289,12 +273,9 @@ if __name__ == '__main__':
         log_wf.write('Global Step %d VAL res:\n' % global_step)
         log_wf.write(str(val_result) + '\n')
 
-        if -val_result['R1'] < best_eval_loss:
-            best_eval_loss = -val_result['R1']
-            val_result['best_eval_loss'] = best_eval_loss
-            # save model
-            print('[Saving at]', state_save_path)
-            log_wf.write('[Saving at] %s\n' % state_save_path)
-            torch.save(model.state_dict(), state_save_path+str(global_step))
+        # save model
+        print('[Saving at]', state_save_path)
+        log_wf.write('[Saving at] %s\n' % state_save_path)
+        torch.save(model.state_dict(), state_save_path)
         print(global_step, tr_loss / nb_tr_steps)
         log_wf.write('%d\t%f\n' % (global_step, tr_loss / nb_tr_steps))
