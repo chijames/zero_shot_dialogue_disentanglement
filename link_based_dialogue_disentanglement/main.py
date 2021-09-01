@@ -14,7 +14,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from task_4_evaluation import *
 
-from transformers import BertModel, BertConfig, BertTokenizer, BertTokenizerFast
+from transformers import BertModel, BertConfig, BertTokenizerFast
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 
 from dataset import SelectionDataset
@@ -30,7 +30,7 @@ def set_seed(args):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-def eval_running_model(dataloader, test=False):
+def eval_running_model(dataloader, mode):
     model.eval()
     preds = []
     for step, batch in enumerate(tqdm(dataloader)):
@@ -45,7 +45,7 @@ def eval_running_model(dataloader, test=False):
         json.dump(preds, outfile)
     exit()
     '''
-    if 'test' in args.gold[0]:
+    if 'test' == mode:
         ids = open(os.path.join(args.train_dir, 'test_ids.txt')).read().splitlines()
         write_file = 'merged_test.txt'
     else:
@@ -59,7 +59,11 @@ def eval_running_model(dataloader, test=False):
         out.write('{}.annotation.txt:{} {} -\n'.format(filename, id-args.max_num_contexts+pred+1, id))
     out.close()
     # read in evaluation data
-    gold, gpoints, gedges = read_data(args.gold)
+    if 'test' == mode:
+        gold, gpoints, gedges = read_data(args.test_gold)
+    else:
+        gold, gpoints, gedges = read_data(args.dev_gold)
+
     auto, apoints, aedges = read_data([write_file])
     issue = False
     for filename in auto:
@@ -122,7 +126,8 @@ if __name__ == '__main__':
         help="Whether to use 16-bit (mixed) precision (through NVIDIA apex) instead of 32-bit",
     )
     parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument('--gold', help='File(s) containing the gold clusters, one per line. If a line contains a ":" the start is considered a filename', required=True, nargs="+")
+    parser.add_argument('--dev_gold', help='File(s) containing the gold clusters, one per line. If a line contains a ":" the start is considered a filename', required=True, nargs="+")
+    parser.add_argument('--test_gold', help='File(s) containing the gold clusters, one per line. If a line contains a ":" the start is considered a filename', required=True, nargs="+")
     args = parser.parse_args()
     print(args)
     os.environ["CUDA_VISIBLE_DEVICES"] = "%d" % args.gpu
@@ -143,14 +148,13 @@ if __name__ == '__main__':
 
     if not args.eval:
         train_dataset = SelectionDataset(os.path.join(args.train_dir, 'train.txt'), args, tokenizer, sample_cnt=args.data_percent)
-        val_dataset = SelectionDataset(os.path.join(args.train_dir, 'test.txt'), args, tokenizer)
+        val_dataset = SelectionDataset(os.path.join(args.train_dir, 'dev.txt'), args, tokenizer)
         train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, collate_fn=train_dataset.batchify_join_str, shuffle=True, num_workers=1)
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
-    else: # test
-        val_dataset = SelectionDataset(os.path.join(args.train_dir, 'test.txt'), args, tokenizer)
-
-    val_dataloader = DataLoader(val_dataset, batch_size=args.eval_batch_size, collate_fn=val_dataset.batchify_join_str, shuffle=False, num_workers=1)
-
+        val_dataloader = DataLoader(val_dataset, batch_size=args.eval_batch_size, collate_fn=val_dataset.batchify_join_str, shuffle=False, num_workers=1)
+    
+    test_dataset = SelectionDataset(os.path.join(args.train_dir, 'test.txt'), args, tokenizer)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.eval_batch_size, collate_fn=test_dataset.batchify_join_str, shuffle=False, num_workers=1)
 
     epoch_start = 1
     global_step = 0
@@ -164,7 +168,7 @@ if __name__ == '__main__':
     log_wf = open(os.path.join(args.output_dir, 'log.txt'), 'a', encoding='utf-8')
     print (args, file=log_wf)
 
-    state_save_path = os.path.join(args.output_dir, 'pytorch_model.bin1')
+    state_save_path = os.path.join(args.output_dir, 'pytorch_model.bin')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ########################################
@@ -193,7 +197,7 @@ if __name__ == '__main__':
     #tokenizer.add_tokens(['\n'], special_tokens=True)
     #model.resize_token_embeddings(len(tokenizer)) 
     if args.two_stage:
-        previous_model_file = os.path.join(args.bert_model, 'pytorch_model.bin1')
+        previous_model_file = os.path.join(args.bert_model, 'pytorch_model.bin')
         print('Loading parameters from', previous_model_file)
         log_wf.write('Loading parameters from %s' % previous_model_file + '\n')
         model_state_dict = torch.load(previous_model_file)
@@ -208,7 +212,7 @@ if __name__ == '__main__':
             print ('Checkpoint ERROR! Some of the variables are not properly loaded with pretrained weights. Check tensor names.')
             exit()
         model.load_state_dict(model_state_dict, strict=False)
-        test_result = eval_running_model(val_dataloader, test=True)
+        test_result = eval_running_model(test_dataloader, 'test')
         print (test_result)
         exit()
         
@@ -265,10 +269,14 @@ if __name__ == '__main__':
                         log_wf.write('%d\t%f\n' % (global_step, tr_loss / nb_tr_steps))
 
                     if global_step and global_step % eval_freq == 0:
-                        val_result = eval_running_model(val_dataloader)
+                        val_result = eval_running_model(val_dataloader, 'dev')
+                        test_result = eval_running_model(test_dataloader, 'test')
                         print('Global Step %d VAL res:\n' % global_step, val_result)
+                        print('Global Step %d TST res:\n' % global_step, test_result)
                         log_wf.write('Global Step %d VAL res:\n' % global_step)
                         log_wf.write(str(val_result) + '\n')
+                        log_wf.write('Global Step %d TST res:\n' % global_step)
+                        log_wf.write(str(test_result) + '\n')
 
                         if val_result['em'] > best_eval_loss:
                             best_eval_loss = val_result['em']
@@ -279,10 +287,14 @@ if __name__ == '__main__':
                 log_wf.flush()
 
         # add a eval step after each epoch
-        val_result = eval_running_model(val_dataloader)
+        val_result = eval_running_model(val_dataloader, 'dev')
+        test_result = eval_running_model(test_dataloader, 'test')
         print('Epoch %d, Global Step %d VAL res:\n' % (epoch, global_step), val_result)
+        print('Epoch %d, Global Step %d TST res:\n' % (epoch, global_step), test_result)
         log_wf.write('Global Step %d VAL res:\n' % global_step)
         log_wf.write(str(val_result) + '\n')
+        log_wf.write('Global Step %d TST res:\n' % global_step)
+        log_wf.write(str(test_result) + '\n')
 
         if val_result['em'] > best_eval_loss:
             best_eval_loss = val_result['em']
