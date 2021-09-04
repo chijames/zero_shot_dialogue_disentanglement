@@ -20,8 +20,6 @@ from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from dataset import SelectionDataset
 from model import CrossEncoder
 
-from sklearn.metrics import label_ranking_average_precision_score
-
 import logging
 logging.basicConfig(level=logging.ERROR)
 
@@ -40,11 +38,7 @@ def eval_running_model(dataloader, mode):
             with torch.cuda.amp.autocast(enabled=args.fp16):
                 logits = model(text_token_ids_list_batch, text_input_masks_list_batch, type_ids_batch)
         preds += torch.argmax(logits, 1).data.cpu().numpy().tolist()
-    '''
-    with open('link/map_res/{}.json'.format(args.max_num_contexts), 'w') as outfile:
-        json.dump(preds, outfile)
-    exit()
-    '''
+    
     if 'test' == mode:
         ids = open(os.path.join(args.train_dir, 'test_ids.txt')).read().splitlines()
         write_file = 'merged_test.txt'
