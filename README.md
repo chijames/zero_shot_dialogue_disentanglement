@@ -8,6 +8,9 @@
 
 2. cd dstc8_2/ then bash parse.sh
 
+## Download BERT Checkpoints
+Download the BERT checkpoint you want from Huggingface model hub. Set the path in three scripts below.
+
 ## Pretraining
 bash pertrain.sh
 
