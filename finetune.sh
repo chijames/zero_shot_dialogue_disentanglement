@@ -1,3 +1,8 @@
 cd link_based_dialogue_disentanglement/
-python main.py --bert_model ../entangled_response_selection/small_noaug_checkpoints/aux_pos_auxweight_0/ --output_dir null/ --train_dir link_no_time/ --max_num_contexts 50 --gold link_no_time/test/*anno* --gpu 1 --two_stage
-#python main.py --bert_model ../../bert_model_small --output_dir null/ --train_dir link_no_time/ --max_num_contexts 50 --gold link_no_time/test/*anno* --gpu 1 --use_pretrain
+
+rm -rf auxweight_0.25/
+cp -r ../entangled_response_selection/auxweight_0.25/ ./
+for j in 0.01 0.1 1
+do
+    python main.py --bert_model auxweight_0.25 --output_dir finetuned_auxweight_0.25 --train_dir link_no_time/ --max_num_contexts 50 --test_gold link_no_time/test/*anno* --gpu 0 --two_stage --dev_gold link_no_time/dev/*anno* --data_percent $j
+done
