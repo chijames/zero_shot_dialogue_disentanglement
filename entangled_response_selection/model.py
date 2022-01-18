@@ -36,14 +36,6 @@ class Encoder(BertPreTrainedModel):
         text_vec = self.pos_enc(text_vec)
         text_vec = self.transformer(text_vec.transpose(1, 0)).transpose(1, 0)
         score = self.linear(text_vec)
-        # use a self attention to promote linking
-        # mask debug
-        '''
-        mask = [0]*seq_len
-        mask[-1] = float('-inf')
-        mask = torch.tensor(mask).unsqueeze(-1).to(score.device)
-        score = score + mask
-        '''
         attn_weights = F.softmax(score, -2)
         score = self.linear2((attn_weights*text_vec).sum(1))
         score = score.view(batch_size, neg)
