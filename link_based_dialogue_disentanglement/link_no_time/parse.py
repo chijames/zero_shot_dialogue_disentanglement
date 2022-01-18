@@ -9,6 +9,7 @@ parser.add_argument("--mode", type=str)
 args = parser.parse_args()
 
 outfile = open('{}.txt'.format(args.mode), 'w')
+outids = open('{}_ids.txt'.format(args.mode), 'w')
 parsed = set()
 
 for filename in tqdm.tqdm(os.listdir(args.dir_path)):
@@ -29,7 +30,7 @@ for filename in tqdm.tqdm(os.listdir(args.dir_path)):
     
     # we assume a message only relates to at most args.num_contexts sentences preceding it
     # the first 1000 sentences (id zero-based) are context without link annotations
-    for min_id in range(1000, len(text)-args.num_contexts+1):
+    for min_id in range(1000-args.num_contexts+1, len(text)-args.num_contexts+1):
         max_id = min_id + args.num_contexts
         cur_connections = []
         for connection in connections:
@@ -70,3 +71,4 @@ for filename in tqdm.tqdm(os.listdir(args.dir_path)):
         for j in range(1, args.num_contexts+1):
             links.append(str(child2parent[j]))
         outfile.write('{}\n'.format(' '.join(links)))
+        outids.write('{} {}\n'.format(date, max_id-1)) # note that the range is [min_id, max_id), so we need to -1 to compensate for that
