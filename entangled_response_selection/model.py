@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -26,23 +25,22 @@ class Encoder(BertPreTrainedModel):
         self.pos_enc = LearnedPositionEncoding(config.hidden_size, self.max_num_contexts+1)
 
     def forward(self, text_input_ids, text_input_masks, text_input_segments, labels=None):
-        batch_size, neg, seq_len, sent_len = text_input_ids.shape
+        batch_size, neg, num_contexts, sent_len = text_input_ids.shape # num_contexts == self.max_num_contexts + 1
         text_input_ids = text_input_ids.reshape(-1, sent_len)
         text_input_masks = text_input_masks.reshape(-1, sent_len)
         text_input_segments = text_input_segments.reshape(-1, sent_len)
-        text_vec = self.bert(text_input_ids, text_input_masks, text_input_segments)[0][:,0,:]  # [bs,dim]
-        dim = text_vec.shape[-1]
-        text_vec = text_vec.reshape(-1, seq_len, dim)
+        text_vec = self.bert(text_input_ids, text_input_masks, text_input_segments)[0][:,0,:]
+        text_vec = text_vec.reshape(-1, num_contexts, text_vec.shape[-1])
         text_vec = self.pos_enc(text_vec)
+        # the transformer layer accepts input in a tricky way hence the double transpose, check the documentation for details
         text_vec = self.transformer(text_vec.transpose(1, 0)).transpose(1, 0)
-        score = self.linear(text_vec)
-        attn_weights = F.softmax(score, -2)
-        score = self.linear2((attn_weights*text_vec).sum(1))
-        score = score.view(batch_size, neg)
+        attn_weights = F.softmax(self.linear(text_vec), -2)
+        score = self.linear2((attn_weights*text_vec).sum(1)).reshape(batch_size, neg)
+
         if labels is not None:
             loss = F.binary_cross_entropy_with_logits(score, labels.float())
             aux_loss = (attn_weights.squeeze()[:,-1]-(1-labels.reshape(-1)))**2
             aux_loss = aux_loss.mean()
             return (1-self.aux_weight)*loss + self.aux_weight*aux_loss
         else:
-            return score, (torch.argmax(attn_weights.squeeze(), 1) == seq_len-1).float()
+            return score, (torch.argmax(attn_weights.squeeze(), 1) == num_contexts-1).float()
